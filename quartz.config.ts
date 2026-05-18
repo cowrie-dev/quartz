@@ -8,7 +8,7 @@ import * as Plugin from "./quartz/plugins"
  */
 const config: QuartzConfig = {
   configuration: {
-    pageTitle: "Quartz 4",
+    pageTitle: "Cowrie Research",
     pageTitleSuffix: "",
     enableSPA: true,
     enablePopovers: true,
@@ -16,8 +16,8 @@ const config: QuartzConfig = {
       provider: "plausible",
     },
     locale: "en-US",
-    baseUrl: "quartz.jzhao.xyz",
-    ignorePatterns: ["private", "templates", ".obsidian"],
+    baseUrl: "research.cowrie.pro",
+    ignorePatterns: ["private", "templates", ".obsidian", "_archive/**", "_templates/**", ".github/**"],
     defaultDateType: "modified",
     theme: {
       fontOrigin: "googleFonts",
@@ -88,8 +88,10 @@ const config: QuartzConfig = {
       Plugin.Static(),
       Plugin.Favicon(),
       Plugin.NotFoundPage(),
-      // Comment out CustomOgImages to speed up build time
-      Plugin.CustomOgImages(),
+      // CustomOgImages fetches Google Fonts at build time, which is
+      // unreliable inside a docker build sandbox.  research.cowrie.pro
+      // doesn't render OG cards yet; re-enable once we ship fonts locally.
+      // Plugin.CustomOgImages(),
     ],
   },
 }
