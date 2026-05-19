@@ -88,10 +88,11 @@ const config: QuartzConfig = {
       Plugin.Static(),
       Plugin.Favicon(),
       Plugin.NotFoundPage(),
-      // CustomOgImages fetches Google Fonts at build time, which is
-      // unreliable inside a docker build sandbox.  research.cowrie.pro
-      // doesn't render OG cards yet; re-enable once we ship fonts locally.
-      // Plugin.CustomOgImages(),
+      // Fonts for Satori are pre-cached in quartz/.quartz-cache/fonts/
+      // (Schibsted+Grotesk-700, Source+Sans+Pro-400), so the build works
+      // offline inside the docker sandbox.  Refresh those files if the
+      // configured header/body fonts change.
+      Plugin.CustomOgImages(),
     ],
   },
 }
