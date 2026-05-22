@@ -96,6 +96,22 @@ export default ((opts?: Partial<GraphOptions>) => {
           </button>
         </div>
         <div class="global-graph-outer">
+          <div class="global-graph-filterbar" data-expanded="false">
+            <button
+              class="global-graph-filterbar-toggle"
+              type="button"
+              aria-expanded="false"
+              aria-controls="global-graph-filterbar-pills"
+            >
+              Filter tags
+            </button>
+            <div
+              id="global-graph-filterbar-pills"
+              class="global-graph-filterbar-pills"
+              role="group"
+              aria-label="Tag filters"
+            ></div>
+          </div>
           <div class="global-graph-container" data-cfg={JSON.stringify(globalGraph)}></div>
         </div>
       </div>

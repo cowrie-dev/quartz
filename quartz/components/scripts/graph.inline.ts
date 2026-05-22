@@ -68,7 +68,90 @@ type TweenNode = {
   stop: () => void
 }
 
-async function renderGraph(graph: HTMLElement, fullSlug: FullSlug) {
+type TagFilter = Set<string> | null
+const UNTAGGED_KEY = "__untagged__"
+
+function nodePassesFilter(filter: TagFilter, id: SimpleSlug, effectiveTags: string[]): boolean {
+  if (filter === null) return true
+  if (id.startsWith("tags/")) {
+    return filter.has(id.substring(5))
+  }
+  if (effectiveTags.length === 0) {
+    return filter.has(UNTAGGED_KEY)
+  }
+  return effectiveTags.some((t) => filter.has(t))
+}
+
+const FILTERBAR_HANDLER_KEY = "__quartzGraphFilterToggleHandler"
+
+function renderFilterPills(
+  filterBar: HTMLElement,
+  allTags: string[],
+  hasUntagged: boolean,
+  onToggle: (key: string, enabled: boolean) => void,
+) {
+  filterBar.style.display = ""
+  const toggleBtn = filterBar.querySelector(
+    ".global-graph-filterbar-toggle",
+  ) as HTMLButtonElement | null
+  const pillsContainer = filterBar.querySelector(
+    ".global-graph-filterbar-pills",
+  ) as HTMLElement | null
+  if (!toggleBtn || !pillsContainer) return
+
+  // Reset any previous state.
+  clearFilterPills(filterBar)
+
+  filterBar.dataset["expanded"] = "false"
+  toggleBtn.setAttribute("aria-expanded", "false")
+
+  const onToggleClick = () => {
+    const expanded = filterBar.dataset["expanded"] === "true"
+    filterBar.dataset["expanded"] = expanded ? "false" : "true"
+    toggleBtn.setAttribute("aria-expanded", String(!expanded))
+  }
+  toggleBtn.addEventListener("click", onToggleClick)
+  ;(filterBar as unknown as Record<string, unknown>)[FILTERBAR_HANDLER_KEY] = onToggleClick
+
+  const items: Array<{ key: string; label: string }> = []
+  if (hasUntagged) items.push({ key: UNTAGGED_KEY, label: "(untagged)" })
+  for (const tag of allTags) items.push({ key: tag, label: tag })
+
+  for (const { key, label } of items) {
+    const pill = document.createElement("button")
+    pill.type = "button"
+    pill.className = "global-graph-filterbar-pill"
+    pill.setAttribute("aria-pressed", "true")
+    pill.dataset["tagKey"] = key
+    pill.textContent = label
+    pill.addEventListener("click", () => {
+      const wasOn = pill.getAttribute("aria-pressed") === "true"
+      pill.setAttribute("aria-pressed", wasOn ? "false" : "true")
+      onToggle(key, !wasOn)
+    })
+    pillsContainer.appendChild(pill)
+  }
+}
+
+function clearFilterPills(filterBar: HTMLElement) {
+  const toggleBtn = filterBar.querySelector(
+    ".global-graph-filterbar-toggle",
+  ) as HTMLButtonElement | null
+  const pillsContainer = filterBar.querySelector(
+    ".global-graph-filterbar-pills",
+  ) as HTMLElement | null
+  const handlerHolder = filterBar as unknown as Record<string, unknown>
+  const handler = handlerHolder[FILTERBAR_HANDLER_KEY] as (() => void) | undefined
+  if (toggleBtn && handler) {
+    toggleBtn.removeEventListener("click", handler)
+  }
+  delete handlerHolder[FILTERBAR_HANDLER_KEY]
+  if (pillsContainer) removeAllChildren(pillsContainer)
+  if (toggleBtn) toggleBtn.setAttribute("aria-expanded", "false")
+  filterBar.dataset["expanded"] = "false"
+}
+
+async function renderGraph(graph: HTMLElement, fullSlug: FullSlug, tagFilter: TagFilter = null) {
   const slug = simplifySlug(fullSlug)
   const visited = getVisited()
   removeAllChildren(graph)
@@ -141,6 +224,16 @@ async function renderGraph(graph: HTMLElement, fullSlug: FullSlug) {
   } else {
     validLinks.forEach((id) => neighbourhood.add(id))
     if (showTags) tags.forEach((tag) => neighbourhood.add(tag))
+  }
+
+  if (tagFilter !== null) {
+    for (const id of [...neighbourhood]) {
+      const rawTags = data.get(id)?.tags ?? []
+      const effectiveTags = rawTags.filter((t) => !removeTags.includes(t))
+      if (!nodePassesFilter(tagFilter, id, effectiveTags)) {
+        neighbourhood.delete(id)
+      }
+    }
   }
 
   const nodes = [...neighbourhood].map((url) => {
@@ -606,10 +699,58 @@ document.addEventListener("nav", async (e: CustomEventMap["nav"]) => {
       }
 
       const graphContainer = container.querySelector(".global-graph-container") as HTMLElement
+      const filterBar = container.querySelector(".global-graph-filterbar") as HTMLElement | null
       registerEscapeHandler(container, hideGlobalGraph)
-      if (graphContainer) {
-        globalGraphCleanups.push(await renderGraph(graphContainer, slug))
+      if (!graphContainer) continue
+
+      const cfg = JSON.parse(graphContainer.dataset["cfg"]!) as D3Config
+      const allData = (await fetchData) as Record<FullSlug, ContentDetails>
+      const tagSet = new Set<string>()
+      let hasUntagged = false
+      for (const [fullSlug, details] of Object.entries(allData)) {
+        const slug = simplifySlug(fullSlug as FullSlug)
+        if (slug.startsWith("tags/")) {
+          // Tag landing page (real or auto-generated). Its key is the suffix.
+          const key = slug.substring(5)
+          if (!cfg.removeTags.includes(key)) tagSet.add(key)
+          continue
+        }
+        const effective = (details.tags ?? []).filter((t) => !cfg.removeTags.includes(t))
+        if (effective.length === 0) hasUntagged = true
+        else effective.forEach((t) => tagSet.add(t))
       }
+      const allTags = [...tagSet].sort()
+
+      let activeFilter: TagFilter = null
+      let currentCleanup: (() => void) | null = null
+      const rerender = async () => {
+        if (currentCleanup) currentCleanup()
+        currentCleanup = await renderGraph(graphContainer, slug, activeFilter)
+      }
+
+      const fullSize = allTags.length + (hasUntagged ? 1 : 0)
+      const onPillToggle = (key: string, enabled: boolean) => {
+        if (activeFilter === null) {
+          activeFilter = new Set(allTags)
+          if (hasUntagged) activeFilter.add(UNTAGGED_KEY)
+        }
+        if (enabled) activeFilter.add(key)
+        else activeFilter.delete(key)
+        if (activeFilter.size === fullSize) activeFilter = null
+        void rerender()
+      }
+
+      if (filterBar && cfg.showTags && fullSize > 0) {
+        renderFilterPills(filterBar, allTags, hasUntagged, onPillToggle)
+      } else if (filterBar) {
+        filterBar.style.display = "none"
+      }
+
+      await rerender()
+      globalGraphCleanups.push(() => {
+        if (currentCleanup) currentCleanup()
+        if (filterBar) clearFilterPills(filterBar)
+      })
     }
   }
 
